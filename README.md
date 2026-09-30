@@ -13,13 +13,22 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phases 0, 1, and 2 complete.** Python packaging, local development tools, documented
-architecture, and tested Pydantic contracts for Asset, ConfigSnapshot, ChangeEvent,
-ConfigDiff, and Alert are available, together with a deterministic stateful
-synthetic generator producing JSON Lines. Kafka, Spark, storage services, API,
-dashboard, and deployments are not implemented. Phase 3 is intentionally deferred.
+**Phases 0–2 complete; Phase 3 Kafka ingestion implemented.** Pydantic contracts,
+a deterministic stateful generator, JSONL output, and a local single-broker Kafka
+path with an explicit asset registry are available. Automated CI is the remaining
+Phase 3 verification step. **Spark is NOT implemented yet**, nor are data-lake,
+search, API, dashboard, or Kubernetes components.
 
-## Architecture overview (target, not yet implemented)
+Implemented Kafka path (all keys are `asset_id`):
+
+```text
+Generator
+  ├─> config.assets       (startup registry)
+  ├─> config.events       (audit / operational history)
+  └─> config.snapshots    (primary future Spark configuration stream)
+```
+
+## Architecture overview (long-term target)
 
 1. Stateful synthetic, file, and optional SSH sources feed a separate collector.
 2. The collector publishes asset-keyed events and snapshots to Kafka.
@@ -35,7 +44,9 @@ See [architecture](docs/architecture.md) and [data model](docs/data-model.md).
 ## Quick start
 
 Prerequisites: Git, Make, an existing Python 3 installation with `venv` and `pip`,
-and internet access for the initial setup. No Docker services are needed yet.
+and internet access for the initial setup. JSONL and unit tests need no services.
+Kafka mode additionally needs a running Docker Engine and Docker Compose v2+
+(Docker Desktop or another compatible runtime on macOS; Docker Engine on Linux).
 
 ```sh
 git clone https://github.com/kongwoang/ConfigStream.git
@@ -50,6 +61,9 @@ temporary files stay inside this repository (`.tools/`, `.cache/`). It does not
 install global tools or edit shell profiles. These generated directories are
 ignored by Git. Setup can be repeated safely.
 
+Setup includes the optional `kafka` dependency for the quickstart. The installed
+library's base dependencies remain sufficient for JSONL; Kafka imports are lazy.
+
 | Command | Purpose |
 | --- | --- |
 | `make setup` | Install the locked development environment |
@@ -58,13 +72,56 @@ ignored by Git. Setup can be repeated safely.
 | `make format` | Apply Ruff fixes and formatting |
 | `make check` | Run lint, formatting checks, and tests |
 | `make generator` | Print 10 changes (20 JSONL records) across 5 assets, seed 42, without sleeping |
+| `make kafka-up` / `make kafka-down` | Start a healthy broker / stop it, preserving its volume |
+| `make kafka-topics` | Create missing topics and verify their explicit configuration |
+| `make kafka-demo` | Publish 3 assets and 8 changes (19 records total) |
+| `make kafka-status` | Show broker status |
+| `make integration-test` | Run real Kafka tests, separately from unit tests |
 | `make clean` | Remove test/build outputs, not datasets or environments |
 
-`.env.example` documents safe configuration placeholders. No service environment
-variables are needed yet; generator settings use CLI arguments. `.env` is not
-automatically loaded. Future services will
-use environment variables; never commit secrets, generated datasets, or service
-state. Keep generated data in the ignored project-local directories.
+`.env.example` documents Kafka environment variables. Defaults work locally;
+Python does not automatically load `.env`. Export overrides in your shell, such as
+`export KAFKA_BOOTSTRAP_SERVERS=localhost:9092`. Never commit credentials, generated
+datasets, or service state. Kafka data is in a Docker-managed named volume, not Git.
+
+## Kafka quickstart
+
+```sh
+make setup
+make check
+make kafka-up
+make kafka-topics
+make kafka-demo
+make kafka-consume-assets KAFKA_CONSUME_MAX_MESSAGES=3
+make kafka-consume-events KAFKA_CONSUME_MAX_MESSAGES=8
+make kafka-consume-snapshots KAFKA_CONSUME_MAX_MESSAGES=8
+make integration-test
+make kafka-down
+```
+
+The broker is pinned to `apache/kafka:4.1.2`, with KRaft, one node, and an IPv4
+loopback listener at `localhost:9092`. Its image supports Linux arm64 and amd64;
+the local acceptance run uses Apple Silicon. This plaintext, replication-factor-1
+setup is **not production-ready**. It does not install a container runtime for you.
+
+```sh
+.venv/bin/python -m generator.main --assets 3 --events 8 --rate 100 --seed 42 --no-sleep --sink kafka
+```
+
+Kafka mode sends one Asset per initialized asset, flushes that registry batch,
+then sends changes. The three active topics receive **3 / 8 / 8** records for a
+fresh demo. Re-running appends records; idempotence does not deduplicate independent
+generator runs. Consumer commands print `key<TAB>JSON` and default to one message.
+
+`--sink jsonl` remains the default with byte-compatible Phase 2 output; asset
+records are only added in Kafka mode. Both transports use the same JSON envelope
+and existing versioned schemas. Kafka logs go to stderr; Kafka mode emits no JSONL
+to stdout and does not accept file output.
+
+**Ordering is only within one partition of one topic.** Sending an event before
+its snapshot is not a cross-topic delivery/consumption guarantee. Future Spark
+processing must primarily consume `config.snapshots`; `config.events` is an audit
+stream, not a required ordered trigger. See [topics and failure semantics](docs/kafka-topics.md).
 
 ## Try the schemas
 
@@ -161,13 +218,14 @@ See [generator design, CLI, verification, and limitations](docs/generator.md).
 | 0 — complete | Bootstrap, architecture, tooling, packaging smoke test |
 | 1 — complete | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
 | 2 — complete | Stateful, seeded synthetic workload generator with JSONL output |
-| 3–4 | Single-broker Kafka in Docker Compose; Spark console consumer |
+| 3 — Kafka implemented | Single-broker Kafka, asset registry, producer tests; CI verification next |
+| 4 | Spark console consumer (not implemented) |
 | 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
 | 7–9 | MinIO/Parquet, Elasticsearch, and thin FastAPI: end-to-end MVP |
 | 10 | Historical Spark analytics and simple frequency anomalies |
 | 11–13 | Optional dashboard, SSH/FRR adapters, then Kubernetes deployment |
 
-Python 3.12, Pydantic, pytest, and Ruff are the initial stack. Kafka, PySpark,
-MinIO, Parquet, Elasticsearch, and FastAPI are planned, not current dependencies.
+Python 3.12, Pydantic, pytest, Ruff, Kafka, and the optional confluent-kafka client
+form the current stack. PySpark, MinIO, Parquet, Elasticsearch, and FastAPI remain planned.
 Each phase is tested, committed, and pushed before the next begins. No throughput,
 latency, fault-tolerance, or exactly-once claims are made before experiments.

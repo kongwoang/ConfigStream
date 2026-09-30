@@ -12,7 +12,7 @@ they are not a database, collector, diff algorithm, or streaming processor.
 - Unknown fields and unsupported schema versions are rejected, not silently dropped.
 - Identifiers, labels, and messages are non-empty strings after trimming surrounding
   whitespace. They are not restricted to UUIDs. Producers supply stable IDs and
-  must use the validated `asset_id` as the future Kafka key.
+  must use the validated `asset_id` as the Kafka key.
 - Timestamps require timezone-aware values, are converted to UTC, and serialize
   as ISO 8601 strings. `event_time` and `ingest_time` are required on snapshots and
   change events: deserialization must not silently invent their times.

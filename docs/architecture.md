@@ -3,11 +3,10 @@
 ## Scope and status
 
 ConfigStream focuses on distributed configuration-change storage and processing.
-Phases 0–2 supply a Python project, tested versioned schemas, and a stateful
-synthetic generator with JSONL output. The generator maintains independent asset
-histories without external services; it does not evaluate rules or compute diffs.
-The distributed components below remain the target architecture. Do not add
-Docker infrastructure, Kubernetes, or monitoring before it is useful.
+Phases 0–3 supply a Python project, tested versioned schemas, a stateful generator,
+JSONL output, and Kafka ingestion with an asset registry. The generator can still
+run without external services. It does not evaluate rules or compute diffs.
+Spark, data-lake/serving sinks, APIs, Kubernetes, and monitoring remain future work.
 
 ## Implemented synthetic source
 
@@ -15,12 +14,45 @@ Docker infrastructure, Kubernetes, or monitoring before it is useful.
 using a local seeded RNG. Type-specific templates and mutation domains are data;
 the mutation and versioning logic is shared across all asset types. Each mutation
 constructs the existing ChangeEvent and ConfigSnapshot models, then advances only
-the selected state. `generator/serialization.py` emits two JSONL envelopes. CLI
-pacing and file/stdout I/O live in `generator/main.py`, outside the engine.
+the selected state. CLI pacing is shared across JSONL and Kafka sinks, outside
+the engine. `messaging/serialization.py` is the common envelope encoder;
+`generator/serialization.py` retains its Phase 2 compatibility interface.
 
-This boundary lets a future collector consume the same model pairs without
-duplicating generation or changing external schemas. No Kafka client or other
-service dependency exists yet. See [generator lifecycle and timing](generator.md).
+`messaging/kafka_producer.py` accepts domain models and owns routing, asset keys,
+callback polling, bounded backpressure, delivery failures, and final flushing.
+confluent-kafka is an optional, lazily imported dependency; generator state and
+schemas have no dependency on its internals. See [generator lifecycle](generator.md).
+
+## Implemented Kafka ingestion
+
+Kafka is the ingestion/message backbone, not an application database. At startup,
+Kafka mode sends N Asset envelopes to `config.assets`, keyed by `asset_id`, and
+waits for this registry batch to be acknowledged before generating changes. It
+does not resend Asset on every mutation. A later update may publish the same key;
+the compacted registry retains its latest value eventually, not immediately.
+
+For each change, the producer enqueues ChangeEvent to `config.events` and
+ConfigSnapshot to `config.snapshots`. Both use the validated asset ID as UTF-8 key.
+Ordering applies **only within a partition of a topic**. There is no cross-topic
+atomicity or ordering, including the asset registry; separate consumers may
+observe records in a different order. Never depend on event-before-snapshot or
+snapshot-after-event arrival. Future enrichment must handle a missing asset row.
+
+`config.snapshots` is the primary future Spark configuration-processing stream.
+`config.events` is for audit, event analytics, triggers, and operational history;
+it is not a necessary ordered precursor to processing a snapshot.
+
+The producer enables Kafka idempotence and `acks=all`, but generator state is
+in-memory and advances before delivery confirmation. Failures produce a nonzero
+exit; successful process completion requires all queued deliveries to be confirmed.
+Replay is deterministic but a new producer/run can append duplicates. No durable
+generator checkpoint, transactions, or exactly-once end-to-end guarantee exists.
+
+Compose runs one combined KRaft controller/broker with replication factor 1,
+automatic topic creation disabled, loopback-only plaintext exposure, and persistent
+Docker volume storage. `make kafka-topics` owns topic initialization/verification.
+This is a local development topology without HA or authentication. See
+[topic configuration, retention, and local commands](kafka-topics.md).
 
 ## Component responsibilities
 
@@ -37,8 +69,9 @@ service dependency exists yet. See [generator lifecycle and timing](generator.md
 ## Streaming path
 
 Collectors publish `ConfigSnapshot` and `ChangeEvent` records separately.
-The planned Kafka topics are `config.snapshots`, `config.events`, `config.alerts`,
-and `config.dlq`. Use **asset_id as the Kafka key** whenever per-asset ordering
+The initialized Kafka topics are `config.assets`, `config.snapshots`, `config.events`,
+`config.alerts`, and `config.dlq`; only the first three have producers. Use
+**asset_id as the Kafka key** whenever per-asset ordering
 matters. A single development broker is sufficient. Kafka ordering is within a
 partition, not global and not across topics. Producers must coordinate version
 assignment for the same asset; repartitioning and retries need explicit handling.

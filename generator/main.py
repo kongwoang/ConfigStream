@@ -1,5 +1,7 @@
 import argparse
+import logging
 import sys
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from decimal import Decimal, DecimalException, InvalidOperation
@@ -10,6 +12,8 @@ from typing import TextIO
 from generator.engine import DEFAULT_START_TIME, MAX_RATE, WorkloadGenerator
 from generator.serialization import serialize_change
 from generator.templates import DEFAULT_ASSET_MIX, TEMPLATES
+from messaging.kafka_producer import KafkaPublishError
+from schemas import ChangeEvent, ConfigSnapshot
 
 
 def positive_integer(value: str) -> int:
@@ -70,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"changes/sec, 1..{MAX_RATE} (default: 100)",
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--sink", choices=("jsonl", "kafka"), default="jsonl")
     parser.add_argument(
         "--start-time",
         type=parse_start_time,
@@ -93,10 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def write_workload(
+def run_workload(
     generator: WorkloadGenerator,
     events: int,
-    output: TextIO,
+    emit: Callable[[ChangeEvent, ConfigSnapshot], None],
     paced: bool = True,
 ) -> None:
     started = monotonic() if paced else 0.0
@@ -105,14 +110,42 @@ def write_workload(
             remaining = started + index / generator.rate - monotonic()
             if remaining > 0:
                 sleep(remaining)
+        emit(event, snapshot)
+
+
+def write_workload(
+    generator: WorkloadGenerator, events: int, output: TextIO, paced: bool = True
+) -> None:
+    def emit(event: ChangeEvent, snapshot: ConfigSnapshot) -> None:
         output.write(serialize_change(event, snapshot))
         if paced:
             output.flush()
+
+    run_workload(generator, events, emit, paced)
+
+
+def publish_workload(generator: WorkloadGenerator, events: int, paced: bool = True) -> None:
+    from messaging.config import KafkaConfig
+    from messaging.kafka_producer import KafkaProducer
+
+    with KafkaProducer(KafkaConfig.from_env()) as producer:
+        for state in generator.states:
+            producer.publish(state.asset)
+        producer.flush()
+
+        def emit(event: ChangeEvent, snapshot: ConfigSnapshot) -> None:
+            producer.publish(event)
+            producer.publish(snapshot)
+
+        run_workload(generator, events, emit, paced)
+    logging.getLogger(__name__).info("Kafka confirmed %s records", producer.delivered)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.sink == "kafka" and args.output != "-":
+        parser.error("--output is only supported with --sink jsonl")
     try:
         generator = WorkloadGenerator(
             assets=args.assets,
@@ -122,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
             asset_mix=args.asset_mix,
         )
         events = args.events if args.events is not None else int(args.duration * args.rate)
+        if args.sink == "kafka":
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+            publish_workload(generator, events, paced=not args.no_sleep)
+            return 0
         if args.output == "-":
             destination = nullcontext(sys.stdout)
         else:
@@ -130,8 +167,10 @@ def main(argv: list[str] | None = None) -> int:
             destination = path.open("x", encoding="utf-8", newline="\n")
         with destination as output:
             write_workload(generator, events, output, paced=not args.no_sleep)
-    except (OSError, ValueError, OverflowError, DecimalException) as error:
+    except (OSError, ValueError, OverflowError, DecimalException, KafkaPublishError) as error:
         parser.exit(2, f"{parser.prog}: error: {error}\n")
+    except KeyboardInterrupt:
+        parser.exit(130, f"{parser.prog}: interrupted; workload may be incomplete\n")
     return 0
 
 

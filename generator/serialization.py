@@ -1,25 +1,11 @@
-import json
-
+from messaging.serialization import serialize_record as serialize_transport_record
 from schemas import ChangeEvent, ConfigSnapshot
 
 
 def serialize_record(record: ChangeEvent | ConfigSnapshot) -> str:
-    if isinstance(record, ChangeEvent):
-        record_type = "change_event"
-    elif isinstance(record, ConfigSnapshot):
-        record_type = "config_snapshot"
-    else:
+    if not isinstance(record, (ChangeEvent, ConfigSnapshot)):
         raise TypeError("only ChangeEvent and ConfigSnapshot records can be serialized")
-    return (
-        json.dumps(
-            {"record_type": record_type, "payload": record.model_dump(mode="json")},
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        + "\n"
-    )
+    return serialize_transport_record(record)
 
 
 def serialize_change(event: ChangeEvent, snapshot: ConfigSnapshot) -> str:

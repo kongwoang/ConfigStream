@@ -1,9 +1,10 @@
 # Stateful synthetic workload generator
 
-Phase 2 is a local, single-process synthetic source. It reuses `schemas.Asset`,
+The generator introduced in Phase 2 is a single-process synthetic source. It reuses `schemas.Asset`,
 `schemas.ChangeEvent`, and `schemas.ConfigSnapshot` without modifying or duplicating
-their contracts. It writes JSON Lines only; no broker, streaming engine, storage
-service, API, or deployment is implemented.
+their contracts. JSON Lines remains the default, service-free mode. Phase 3 adds
+an optional Kafka sink and startup Asset registry without changing the generated
+change histories. See [Kafka setup and topic contract](kafka-topics.md).
 
 ## Run
 
@@ -28,6 +29,7 @@ make generator
 | `--start-time` | Timezone-aware ISO 8601, default `2026-09-30T00:00:00Z` |
 | `--asset-mix` | Ordered comma-separated type list, default `network_device,nginx_server,generic_service` |
 | `--output` | New UTF-8 file; default `-` means stdout |
+| `--sink` | `jsonl` (default) or `kafka`; file output is JSONL-only |
 | `--no-sleep` | Generate as fast as possible; record timestamps remain unchanged |
 
 Exactly one of `--events` and `--duration` is required. Fractional durations are
@@ -48,7 +50,8 @@ does not delete datasets.
 2. Create a distinct Asset and template dictionary per asset. Asset `created_at`
    equals the configured start time. Internal state starts at version **0**, with
    no last snapshot ID or event time. Asset records and version-0 templates are
-   not emitted in Phase 2.
+   not emitted in JSONL mode. Kafka publishes one Asset per initialized asset
+   before workload changes, but still does not emit version-0 snapshots.
 3. Uniformly sample one asset with the generator's private `random.Random` instance.
    Select an applicable mutation and transform a copy of that asset's configuration.
 4. Build and validate a ChangeEvent and ConfigSnapshot using existing schemas.
@@ -155,9 +158,10 @@ Event metadata includes `mutation`, `setting`, `old_value`, `new_value`,
 Snapshot metadata is not extended: it uses the existing `asset_id`, per-asset
 `version`, timestamps, hash, `config_format="text"`, inline content, and null URI.
 
-`serialization.py` is the only JSONL encoding boundary. The engine returns model
-pairs through `next_change()` or `generate(count)`; a future collector can publish
-those same records without moving mutation logic into a transport adapter.
+`messaging/serialization.py` is the shared envelope encoding boundary;
+`generator/serialization.py` delegates to it for compatible JSONL output. The
+engine returns model pairs through `next_change()` or `generate(count)`; the Kafka
+sink publishes those same records without moving mutations into transport code.
 State advances when a pair is generated, not after an external acknowledgement.
 Output failures/interruption can leave a partial file/pair; no durability,
 checkpoint/resume, cross-record atomicity, or delivery guarantee is provided.
@@ -230,9 +234,14 @@ print("Peak RSS (bytes on macOS, KiB on Linux):", resource.getrusage(resource.RU
 PY
 ```
 
-## Next boundary
+## Kafka mode and next boundary
 
-Phase 3 should add a single local broker, documented topics/asset keys, and a
-collector producer wrapper over generated model pairs. Keep JSONL available for
-offline tests; add producer delivery/error tests and consumer-CLI verification
-before introducing Spark. None of those components is implemented in Phase 2.
+Phase 3 implements a single broker, explicit topics, asset registry, and producer
+wrapper. Use `--sink kafka`; no additional Asset lines appear in JSONL mode. Rate
+controls changes, not startup asset publication. The registry batch is flushed
+before generating changes, and remaining messages are flushed at shutdown. Both
+flush timeout and delivery callback errors fail the command. Cross-topic arrival
+order and atomicity are not guaranteed. Generator state remains non-durable.
+
+Phase 4 should add a minimal Spark consumer for `config.snapshots` while retaining
+JSONL as an offline test path. Spark is not implemented yet.
