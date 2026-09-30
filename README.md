@@ -13,10 +13,10 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phases 0–2 complete; Phase 3 Kafka ingestion implemented.** Pydantic contracts,
+**Phases 0, 1, 2, and 3 complete.** Pydantic contracts,
 a deterministic stateful generator, JSONL output, and a local single-broker Kafka
-path with an explicit asset registry are available. Automated CI is the remaining
-Phase 3 verification step. **Spark is NOT implemented yet**, nor are data-lake,
+path with an explicit asset registry and automated CI are available.
+**Spark is NOT implemented yet**, nor are data-lake,
 search, API, dashboard, or Kubernetes components.
 
 Implemented Kafka path (all keys are `asset_id`):
@@ -78,6 +78,11 @@ library's base dependencies remain sufficient for JSONL; Kafka imports are lazy.
 | `make kafka-status` | Show broker status |
 | `make integration-test` | Run real Kafka tests, separately from unit tests |
 | `make clean` | Remove test/build outputs, not datasets or environments |
+
+[GitHub Actions CI](https://github.com/kongwoang/ConfigStream/actions/workflows/ci.yml)
+runs on pushes to `main` and pull requests, using Python 3.12 on Ubuntu, locked
+dependencies, and `make check`. It caches dependency downloads; it does not start
+Docker or run Kafka integration tests. Run those separately with the commands below.
 
 `.env.example` documents Kafka environment variables. Defaults work locally;
 Python does not automatically load `.env`. Export overrides in your shell, such as
@@ -218,7 +223,7 @@ See [generator design, CLI, verification, and limitations](docs/generator.md).
 | 0 — complete | Bootstrap, architecture, tooling, packaging smoke test |
 | 1 — complete | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
 | 2 — complete | Stateful, seeded synthetic workload generator with JSONL output |
-| 3 — Kafka implemented | Single-broker Kafka, asset registry, producer tests; CI verification next |
+| 3 — complete | Single-broker Kafka, asset registry, producer tests, GitHub Actions quality checks |
 | 4 | Spark console consumer (not implemented) |
 | 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
 | 7–9 | MinIO/Parquet, Elasticsearch, and thin FastAPI: end-to-end MVP |
