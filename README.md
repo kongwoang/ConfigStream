@@ -13,10 +13,11 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phases 0 and 1 complete.** Python packaging, local development tools, documented
+**Phases 0, 1, and 2 complete.** Python packaging, local development tools, documented
 architecture, and tested Pydantic contracts for Asset, ConfigSnapshot, ChangeEvent,
-ConfigDiff, and Alert are available. No generator, Kafka, Spark, storage service,
-API, dashboard, or deployment is implemented yet. Phase 2 is intentionally deferred.
+ConfigDiff, and Alert are available, together with a deterministic stateful
+synthetic generator producing JSON Lines. Kafka, Spark, storage services, API,
+dashboard, and deployments are not implemented. Phase 3 is intentionally deferred.
 
 ## Architecture overview (target, not yet implemented)
 
@@ -56,10 +57,12 @@ ignored by Git. Setup can be repeated safely.
 | `make lint` | Check Ruff lint and formatting |
 | `make format` | Apply Ruff fixes and formatting |
 | `make check` | Run lint, formatting checks, and tests |
+| `make generator` | Print 10 changes (20 JSONL records) across 5 assets, seed 42, without sleeping |
 | `make clean` | Remove test/build outputs, not datasets or environments |
 
-`.env.example` documents safe configuration placeholders. No runtime application
-settings exist yet and `.env` is not automatically loaded. Future services will
+`.env.example` documents safe configuration placeholders. No service environment
+variables are needed yet; generator settings use CLI arguments. `.env` is not
+automatically loaded. Future services will
 use environment variables; never commit secrets, generated datasets, or service
 state. Keep generated data in the ignored project-local directories.
 
@@ -109,11 +112,47 @@ Example change event (independent of the snapshot topic):
 }
 ```
 
-The `synthetic` source label illustrates the contract; a producer does not exist
-yet. See [data-model semantics and limitations](docs/data-model.md) before writing
-producers or consumers. Tests exercise invalid inputs, generic assets, JSON
+The Phase 2 generator uses this contract and includes mutation details in event
+metadata. See [data-model semantics and limitations](docs/data-model.md) before
+writing producers or consumers. Tests exercise invalid inputs, generic assets, JSON
 round-trips, timestamp handling, content locations/hashes, diff consistency, and
 severity values. They are schema tests, not pipeline integration or performance tests.
+
+## Generate a stateful workload
+
+```sh
+make generator
+.venv/bin/python -m generator.main --assets 3 --events 8 --seed 42
+.venv/bin/python -m generator.main --assets 100 --events 1000 --rate 100 --seed 42 --no-sleep
+.venv/bin/python -m generator.main --assets 1000 --duration 30 --rate 100 --seed 42 --no-sleep --output datasets/sample.jsonl
+```
+
+Each asset owns a separate configuration and version counter. Mutations transform
+its previous state rather than creating unrelated snapshots. Built-in types are
+`network_device`, `nginx_server`, and `generic_service`. An internal template is
+version 0 (not emitted); the first mutation emits version 1. Later changes link to
+the preceding emitted snapshot for that asset.
+
+Every change writes **ChangeEvent first, ConfigSnapshot second**, one envelope per
+line. For `--assets 3 --events 8 --seed 42`, the first output line is:
+
+```json
+{"payload":{"asset_id":"service-000003","event_id":"evt-73e40c41-486c-596a-ba0a-cd52d958a7dd","event_time":"2026-09-30T00:00:00Z","event_type":"config_changed","ingest_time":"2026-09-30T00:00:00.005000Z","metadata":{"asset_type":"generic_service","mutation":"change_scalar","new_value":"15","old_value":"30","previous_snapshot_id":null,"sequence":0,"setting":"timeout","snapshot_id":"snap-d97a8487-9359-5f8b-840a-1054a6ccb455"},"schema_version":"1.0","source":"synthetic"},"record_type":"change_event"}
+```
+
+The following snapshot contains `timeout 15` instead of the template's `timeout 30`.
+`--rate` means changes per second, not JSONL lines. Real-time pacing is enabled by
+default; `--no-sleep` removes waiting without altering record contents. Duration
+produces `floor(duration * rate)` changes, not a nondeterministic wall-clock cutoff.
+
+The same seed and arguments produce byte-identical output, including IDs, hashes,
+and timestamps. Defaults are seed **42**, rate **100**, and start time
+**2026-09-30T00:00:00Z**; simulated ingestion is 5 ms later. Custom timezone-aware
+`--start-time` and comma-separated `--asset-mix` are supported. Stdout is the
+default; file output creates parent directories but refuses to overwrite existing
+files. Generated `.jsonl` files and `datasets/` are ignored by Git.
+
+See [generator design, CLI, verification, and limitations](docs/generator.md).
 
 ## Initial roadmap
 
@@ -121,7 +160,7 @@ severity values. They are schema tests, not pipeline integration or performance 
 | --- | --- |
 | 0 — complete | Bootstrap, architecture, tooling, packaging smoke test |
 | 1 — complete | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
-| 2 | Stateful, seeded synthetic workload generator with console output |
+| 2 — complete | Stateful, seeded synthetic workload generator with JSONL output |
 | 3–4 | Single-broker Kafka in Docker Compose; Spark console consumer |
 | 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
 | 7–9 | MinIO/Parquet, Elasticsearch, and thin FastAPI: end-to-end MVP |

@@ -5,7 +5,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export TMPDIR := $(CURDIR)/.cache/tmp
 
-.PHONY: setup test lint format check clean
+.PHONY: setup test lint format check generator clean
 
 setup:
 	mkdir -p .cache/tmp .tools
@@ -24,6 +24,9 @@ format:
 	.venv/bin/ruff check --fix .
 
 check: lint test
+
+generator:
+	@.venv/bin/python -m generator.main --assets 5 --events 10 --seed 42 --no-sleep
 
 clean:
 	rm -rf .pytest_cache .ruff_cache build dist htmlcov .coverage

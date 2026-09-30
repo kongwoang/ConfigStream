@@ -3,10 +3,24 @@
 ## Scope and status
 
 ConfigStream focuses on distributed configuration-change storage and processing.
-Phases 0–1 supply a Python project, tested versioned schemas, and architecture
-documentation only. The components below describe the target system; their
-existence here does not imply implementation. Do not add Docker infrastructure,
-Kubernetes, or monitoring before it is useful.
+Phases 0–2 supply a Python project, tested versioned schemas, and a stateful
+synthetic generator with JSONL output. The generator maintains independent asset
+histories without external services; it does not evaluate rules or compute diffs.
+The distributed components below remain the target architecture. Do not add
+Docker infrastructure, Kubernetes, or monitoring before it is useful.
+
+## Implemented synthetic source
+
+`generator/engine.py` maintains a list of per-asset states and selects an asset
+using a local seeded RNG. Type-specific templates and mutation domains are data;
+the mutation and versioning logic is shared across all asset types. Each mutation
+constructs the existing ChangeEvent and ConfigSnapshot models, then advances only
+the selected state. `generator/serialization.py` emits two JSONL envelopes. CLI
+pacing and file/stdout I/O live in `generator/main.py`, outside the engine.
+
+This boundary lets a future collector consume the same model pairs without
+duplicating generation or changing external schemas. No Kafka client or other
+service dependency exists yet. See [generator lifecycle and timing](generator.md).
 
 ## Component responsibilities
 
