@@ -1,0 +1,44 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.tools/
+.cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+.aws/
+.ssh/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+credentials.json
+service-account*.json
+
+# Generated datasets and service state
+/data/
+/datasets/
+/artifacts/
+/checkpoints/
+/kafka-data/
+/minio-data/
+/elasticsearch-data/
+/spark-warehouse/
+/metastore_db/
+*.parquet
+*.log
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
