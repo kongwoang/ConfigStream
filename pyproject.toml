@@ -12,17 +12,21 @@ dependencies = ["pydantic>=2.10,<3"]
 
 [project.optional-dependencies]
 kafka = ["confluent-kafka>=2.6,<3"]
+spark = ["pyspark==4.0.2"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["schemas", "generator", "messaging"]
+packages = ["schemas", "generator", "messaging", "spark"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
-markers = ["integration: requires a running Kafka broker and initialized topics"]
+markers = [
+    "integration: requires a running Kafka broker and initialized topics",
+    "spark_integration: requires local Spark, Java 21, Kafka, and the Kafka connector",
+]
 
 [tool.ruff]
 target-version = "py312"

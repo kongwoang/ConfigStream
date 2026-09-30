@@ -36,6 +36,7 @@ service-account*.json
 /spark-warehouse/
 /metastore_db/
 *.parquet
+*.jar
 *.jsonl
 *.log
 

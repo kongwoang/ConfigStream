@@ -243,5 +243,6 @@ before generating changes, and remaining messages are flushed at shutdown. Both
 flush timeout and delivery callback errors fail the command. Cross-topic arrival
 order and atomicity are not guaranteed. Generator state remains non-durable.
 
-Phase 4 should add a minimal Spark consumer for `config.snapshots` while retaining
-JSONL as an offline test path. Spark is not implemented yet.
+Phase 4 adds a direct Spark consumer for `config.snapshots` while retaining JSONL
+as an offline test path. See [Spark parsing and validation](spark-streaming.md).
+Normalization, diff, and rules remain future work.

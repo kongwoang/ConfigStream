@@ -13,10 +13,12 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phases 0, 1, 2, and 3 complete.** Pydantic contracts,
+**Phases 0, 1, 2, 3, and 4 complete.** Pydantic contracts,
 a deterministic stateful generator, JSONL output, and a local single-broker Kafka
 path with an explicit asset registry and automated CI are available.
-**Spark is NOT implemented yet**, nor are data-lake,
+Spark Structured Streaming now reads `config.snapshots`, parses and validates
+envelopes, and prints safe metadata with valid/invalid diagnostics.
+**Normalization, diff, and rules are NOT implemented yet**, nor are data-lake,
 search, API, dashboard, or Kubernetes components.
 
 Implemented Kafka path (all keys are `asset_id`):
@@ -25,7 +27,7 @@ Implemented Kafka path (all keys are `asset_id`):
 Generator
   ├─> config.assets       (startup registry)
   ├─> config.events       (audit / operational history)
-  └─> config.snapshots    (primary future Spark configuration stream)
+  └─> config.snapshots ─> Spark readStream ─> parse / validate ─> console
 ```
 
 ## Architecture overview (long-term target)
@@ -77,12 +79,17 @@ library's base dependencies remain sufficient for JSONL; Kafka imports are lazy.
 | `make kafka-demo` | Publish 3 assets and 8 changes (19 records total) |
 | `make kafka-status` | Show broker status |
 | `make integration-test` | Run real Kafka tests, separately from unit tests |
+| `make spark-setup` | Install locked Kafka + Spark extras; requires an external Java 21 JDK |
+| `make spark-stream` | Read snapshot envelopes into a safe diagnostic console |
+| `make spark-test` | Run tiny local[2] Spark SQL tests, without Kafka |
+| `make spark-integration-test` | Verify real Kafka → Spark, invalid records, and checkpoint resume |
 | `make clean` | Remove test/build outputs, not datasets or environments |
 
 [GitHub Actions CI](https://github.com/kongwoang/ConfigStream/actions/workflows/ci.yml)
 runs on pushes to `main` and pull requests, using Python 3.12 on Ubuntu, locked
-dependencies, and `make check`. It caches dependency downloads; it does not start
-Docker or run Kafka integration tests. Run those separately with the commands below.
+dependencies, and `make check`. A separate Java 21 job runs `make spark-test`.
+Neither job starts Docker or runs Kafka/Spark integration tests. Dependency
+downloads are cached. Run service-dependent tests separately as documented below.
 
 `.env.example` documents Kafka environment variables. Defaults work locally;
 Python does not automatically load `.env`. Export overrides in your shell, such as
@@ -124,9 +131,68 @@ and existing versioned schemas. Kafka logs go to stderr; Kafka mode emits no JSO
 to stdout and does not accept file output.
 
 **Ordering is only within one partition of one topic.** Sending an event before
-its snapshot is not a cross-topic delivery/consumption guarantee. Future Spark
-processing must primarily consume `config.snapshots`; `config.events` is an audit
+its snapshot is not a cross-topic delivery/consumption guarantee. Spark
+processing consumes `config.snapshots`; `config.events` is an audit
 stream, not a required ordered trigger. See [topics and failure semantics](docs/kafka-topics.md).
+
+## Spark streaming quickstart
+
+Install a **Java 21 JDK** separately; `java -version` must report major 21. Set
+`JAVA_HOME` if needed. Spark/PySpark is pinned to **4.0.2**, Scala binary **2.13**,
+and connector **`org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.2`**. The Python
+entry point resolves that connector automatically; internet access is needed on
+first launch. Kafka stays in Docker; Spark runs on the host, not in a new cluster.
+
+```sh
+java -version
+make spark-setup
+make check
+make spark-test
+```
+
+Terminal A, from the project root:
+
+```sh
+make kafka-up
+make kafka-topics
+make spark-stream
+```
+
+Wait for the first `Progress` log (initial offsets established). In terminal B:
+
+```sh
+make kafka-demo
+```
+
+Expect **8 valid snapshot rows**, showing asset ID, version, snapshot ID, UTC event
+time, hash, and Kafka metadata. Assets/events are not consumed. The single console
+query labels invalid rows with `record_status=invalid` and `validation_error`;
+neither branch prints configuration content or URIs. The display samples at most
+20 rows per batch by default; it is not durable storage or a full audit log.
+
+To exercise malformed JSON, wrong record type, missing asset ID, and key mismatch:
+
+```sh
+.venv/bin/python -m scripts.kafka_invalid_demo
+make spark-integration-test
+```
+
+These are deliberately bad **local test records**. The live query stays running
+and shows four diagnostics. Stop it with Ctrl-C, then `make kafka-down`.
+
+Default `SPARK_STARTING_OFFSETS=latest` reads new data on a fresh query. For bounded
+replay of retained history, use **a new checkpoint directory**:
+
+```sh
+SPARK_STARTING_OFFSETS=earliest \
+SPARK_CHECKPOINT_DIR=.cache/spark-checkpoints/replay-example \
+make spark-stream SPARK_ARGS=--available-now
+```
+
+An existing checkpoint overrides starting offsets; reusing it resumes rather than
+replaying. Checkpoints and downloaded JARs are ignored. See [Spark runtime, SQL
+validation, progress, and acceptance](docs/spark-streaming.md). `make setup` syncs
+only the base/Kafka environment; use `make spark-setup` again before Spark commands.
 
 ## Try the schemas
 
@@ -224,13 +290,13 @@ See [generator design, CLI, verification, and limitations](docs/generator.md).
 | 1 — complete | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
 | 2 — complete | Stateful, seeded synthetic workload generator with JSONL output |
 | 3 — complete | Single-broker Kafka, asset registry, producer tests, GitHub Actions quality checks |
-| 4 | Spark console consumer (not implemented) |
+| 4 — complete | Direct Spark Kafka source, envelope parsing, validation, diagnostics, checkpoints |
 | 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
 | 7–9 | MinIO/Parquet, Elasticsearch, and thin FastAPI: end-to-end MVP |
 | 10 | Historical Spark analytics and simple frequency anomalies |
 | 11–13 | Optional dashboard, SSH/FRR adapters, then Kubernetes deployment |
 
-Python 3.12, Pydantic, pytest, Ruff, Kafka, and the optional confluent-kafka client
-form the current stack. PySpark, MinIO, Parquet, Elasticsearch, and FastAPI remain planned.
+Python 3.12, Pydantic, pytest, Ruff, Kafka, optional confluent-kafka, and PySpark 4.0.2
+form the current stack. MinIO, Parquet, Elasticsearch, and FastAPI remain planned.
 Each phase is tested, committed, and pushed before the next begins. No throughput,
 latency, fault-tolerance, or exactly-once claims are made before experiments.

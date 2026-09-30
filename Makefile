@@ -10,6 +10,8 @@ export TMPDIR := $(CURDIR)/.cache/tmp
 .PHONY: setup test lint format check generator clean
 .PHONY: kafka-up kafka-down kafka-topics kafka-status kafka-demo integration-test
 .PHONY: kafka-consume-assets kafka-consume-events kafka-consume-snapshots
+.PHONY: spark-setup spark-test spark-stream spark-integration-test
+SPARK_ARGS ?=
 
 setup:
 	mkdir -p .cache/tmp .tools
@@ -18,6 +20,18 @@ setup:
 
 test:
 	.venv/bin/python -m pytest tests/unit
+
+spark-setup: setup
+	"$(UV)" sync --locked --extra kafka --extra spark
+
+spark-test:
+	.venv/bin/python -m pytest tests/spark
+
+spark-stream:
+	.venv/bin/python -m spark.streaming.main $(SPARK_ARGS)
+
+spark-integration-test:
+	.venv/bin/python -m pytest -m spark_integration tests/spark_integration
 
 lint:
 	.venv/bin/ruff check .

@@ -9,8 +9,9 @@ without putting Kafka internals into generator state. `make setup` installs the
 locked Kafka extra; a base `configstream` install remains sufficient for JSONL.
 
 All five topics below are explicitly initialized, with **replication factor 1**.
-Only assets/events/snapshots have producers. Alert evaluation, DLQ routing, and
-Spark are **not implemented**. RF=1 and a combined broker/controller are local
+Only assets/events/snapshots have producers. Alert evaluation and DLQ routing
+are **not implemented**. Phase 4 adds a [Spark snapshot console
+consumer](spark-streaming.md). RF=1 and a combined broker/controller are local
 development choices, not a production deployment.
 
 ## Topic contracts
@@ -19,7 +20,7 @@ development choices, not a production deployment.
 | --- | --- | --- | --- | --- | --- | --- |
 | `config.assets` | 3 | `asset_id` | Asset | Workload startup; updates via producer wrapper | Compacted reference registry; metadata enrichment | `compact`, `retention.ms=-1` |
 | `config.events` | 6 | `asset_id` | ChangeEvent | Each generator mutation | Audit, event analytics, operational history, triggers | `delete`, 7 days |
-| `config.snapshots` | 6 | `asset_id` | ConfigSnapshot | Each generator mutation | **Primary future Spark configuration stream** | `delete`, 7 days |
+| `config.snapshots` | 6 | `asset_id` | ConfigSnapshot | Each generator mutation | **Primary Spark configuration stream; Phase 4 console consumer** | `delete`, 7 days |
 | `config.alerts` | 3 | `asset_id` (planned) | Alert (planned) | None | Processing output / alert consumers | `delete`, 7 days |
 | `config.dlq` | 3 | Original key when known (planned) | Original payload + error + ingest time (not implemented) | None | Invalid/unprocessable-record inspection and replay | `delete`, 7 days |
 
@@ -63,7 +64,7 @@ mutation. This call order is **not a cross-topic delivery or consumption guarant
 Ordering is only within one partition of one topic; it is not global and not
 across topics. An independently scheduled snapshot consumer can observe a snapshot
 before the corresponding event or before its asset-registry consumer is caught up.
-Future Spark must primarily consume `config.snapshots`, not wait for an event
+Spark consumes `config.snapshots`, without waiting for an event
 trigger that supposedly arrived first. Correlation uses existing asset/snapshot IDs.
 
 ## Producer configuration and failure boundary

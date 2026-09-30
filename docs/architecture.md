@@ -3,10 +3,11 @@
 ## Scope and status
 
 ConfigStream focuses on distributed configuration-change storage and processing.
-Phases 0–3 supply a Python project, tested versioned schemas, a stateful generator,
-JSONL output, and Kafka ingestion with an asset registry. The generator can still
-run without external services. It does not evaluate rules or compute diffs.
-Spark, data-lake/serving sinks, APIs, Kubernetes, and monitoring remain future work.
+Phases 0–4 supply a Python project, tested versioned schemas, a stateful generator,
+JSONL output, Kafka ingestion with an asset registry, and direct Spark Structured
+Streaming parsing/validation to console. The generator can still run without
+external services. Normalization, diffs, rules, data-lake/serving sinks, APIs,
+Kubernetes, and monitoring systems remain future work.
 
 ## Implemented synthetic source
 
@@ -38,7 +39,7 @@ atomicity or ordering, including the asset registry; separate consumers may
 observe records in a different order. Never depend on event-before-snapshot or
 snapshot-after-event arrival. Future enrichment must handle a missing asset row.
 
-`config.snapshots` is the primary future Spark configuration-processing stream.
+`config.snapshots` is the primary Spark configuration-processing stream.
 `config.events` is for audit, event analytics, triggers, and operational history;
 it is not a necessary ordered precursor to processing a snapshot.
 
@@ -54,13 +55,34 @@ Docker volume storage. `make kafka-topics` owns topic initialization/verificatio
 This is a local development topology without HA or authentication. See
 [topic configuration, retention, and local commands](kafka-topics.md).
 
+## Implemented Spark consumer
+
+Host-local Spark 4.0.2 uses `readStream.format("kafka")` to subscribe exclusively
+to `config.snapshots`. No Python Kafka consumer feeds the processing path. SQL
+`from_json` and a separate StructType parse the existing JSON envelope. SQL
+expressions validate basic fields, UTC timestamps, content-location exclusivity,
+and Kafka key equality; no per-row Python/Pydantic UDF is involved.
+
+The classified streaming DataFrame retains snapshot content and Kafka provenance.
+A valid-snapshot projection exposes the clean transport fields and metadata.
+One checkpointed `writeStream.format("console")` projects safe columns only and
+labels each row valid/invalid with a fixed diagnostic reason. This is one query,
+not two independently advancing readers; malformed records remain visible without
+logging raw configuration. This diagnostic classification is not a DLQ producer.
+
+Checkpointed query progress supports local restart. Starting offsets apply only
+without prior progress; Kafka retention/deletion can still prevent recovery. A
+console display is not a durable or exactly-once sink. Spark's native progress
+metrics are logged without claiming measured throughput. See
+[version matrix, launch commands, and validation scope](spark-streaming.md).
+
 ## Component responsibilities
 
 | Component | Responsibility and rationale |
 | --- | --- |
 | Sources and collector | Obtain configuration; generate IDs, versions, timestamps; publish records without processing business rules |
 | Kafka | Decouple ingestion from compute; retain an ordered, replayable log per partition |
-| Spark Structured Streaming | Distributed parsing, validation, normalization, stateful comparison, rules, and event-time aggregations |
+| Spark Structured Streaming | Implemented parsing and basic validation; planned normalization, stateful comparison, rules, and event-time aggregations |
 | MinIO + Parquet | S3-compatible local historical source of truth; columnar data for analytical reads |
 | Elasticsearch | Derived, rebuildable serving/search indexes; not the authoritative historical store |
 | Spark batch | Read historical Parquet for frequency, severity, and anomaly analytics |
@@ -76,8 +98,9 @@ matters. A single development broker is sufficient. Kafka ordering is within a
 partition, not global and not across topics. Producers must coordinate version
 assignment for the same asset; repartitioning and retries need explicit handling.
 
-Spark will parse and validate records, route malformed/unsupported records to the
-DLQ, deduplicate IDs, normalize content, compare consecutive snapshots per asset,
+Spark now parses and validates snapshots to console diagnostics. Future stages
+will route malformed/unsupported records to the DLQ, deduplicate IDs, normalize
+content, compare consecutive snapshots per asset,
 evaluate YAML rules, and calculate window metrics. The DLQ must preserve the
 original payload, ingestion timestamp, and reason under controlled access.
 Spark owns this state and computation; the collector and API do not emulate it.
@@ -88,8 +111,8 @@ timezone. Event-time watermarks will bound state and tolerated lateness. Delayed
 duplicate, and out-of-order records require tested policies before adding sinks.
 Arrival order alone is not enough to identify the correct preceding version.
 
-Checkpointing and idempotent document identifiers are planned. Multiple sinks
-are not automatically one atomic transaction; replay and partial-write recovery
+Console query checkpointing is implemented; idempotent document identifiers are
+planned. Multiple sinks are not automatically one atomic transaction; replay and partial-write recovery
 must be designed and tested rather than advertised as end-to-end exactly-once.
 
 ## Storage and batch path
