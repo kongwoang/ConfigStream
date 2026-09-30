@@ -3,9 +3,10 @@
 ## Scope and status
 
 ConfigStream focuses on distributed configuration-change storage and processing.
-Phase 0 supplies a Python project and design drafts only. The components below
-describe the target system; their existence here does not imply implementation.
-Do not add Docker infrastructure, Kubernetes, or monitoring before it is useful.
+Phases 0–1 supply a Python project, tested versioned schemas, and architecture
+documentation only. The components below describe the target system; their
+existence here does not imply implementation. Do not add Docker infrastructure,
+Kubernetes, or monitoring before it is useful.
 
 ## Component responsibilities
 
@@ -69,6 +70,9 @@ assets, and later rolling mean/standard-deviation/z-score anomalies.
 
 - Asset metadata is extensible; a network device is one asset type, not the schema.
 - Snapshot content can be inline initially and referenced by `content_uri` later.
+- Phase 1 verifies inline raw-content hashes and local record consistency. It
+  neither reads URI content nor checks cross-record references, deduplicates IDs,
+  or enforces sequential versions. Those operations need producer/processor state.
 - Raw configuration may contain credentials. It is never safe merely because it
   passes schema validation. Mask before serving; restrict raw lake/DLQ access.
 - Schemas must not log payloads on validation failure without sanitization.

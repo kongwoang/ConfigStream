@@ -20,8 +20,8 @@ lint:
 	.venv/bin/ruff format --check .
 
 format:
-	.venv/bin/ruff check --fix .
 	.venv/bin/ruff format .
+	.venv/bin/ruff check --fix .
 
 check: lint test
 

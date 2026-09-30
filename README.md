@@ -13,10 +13,10 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phase 0: repository bootstrap.** Python packaging, local development tools, a
-packaging smoke test, and architecture/data-model drafts are available. Domain
-schemas are the next milestone. No generator, Kafka, Spark, storage service, API,
-dashboard, or deployment is implemented yet.
+**Phases 0 and 1 complete.** Python packaging, local development tools, documented
+architecture, and tested Pydantic contracts for Asset, ConfigSnapshot, ChangeEvent,
+ConfigDiff, and Alert are available. No generator, Kafka, Spark, storage service,
+API, dashboard, or deployment is implemented yet. Phase 2 is intentionally deferred.
 
 ## Architecture overview (target, not yet implemented)
 
@@ -63,12 +63,64 @@ settings exist yet and `.env` is not automatically loaded. Future services will
 use environment variables; never commit secrets, generated datasets, or service
 state. Keep generated data in the ignored project-local directories.
 
+## Try the schemas
+
+After setup, this example constructs and validates an inline snapshot:
+
+```sh
+.venv/bin/python - <<'PY'
+from datetime import UTC, datetime
+from hashlib import sha256
+
+from schemas import ConfigSnapshot
+
+content = "hostname router-001\nlogging enabled\n"
+snapshot = ConfigSnapshot(
+    snapshot_id="snap-001",
+    asset_id="router-001",
+    version=1,
+    event_time=datetime(2026, 9, 30, 3, 0, tzinfo=UTC),
+    ingest_time=datetime.now(UTC),
+    hash=sha256(content.encode("utf-8")).hexdigest(),
+    content=content,
+)
+print(snapshot.model_dump_json(indent=2))
+assert ConfigSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+PY
+```
+
+All five entities emit `schema_version: "1.0"`. Timestamp inputs require a timezone
+and are converted to UTC. A snapshot has exactly one of `content` or `content_uri`;
+an inline snapshot's SHA-256 is checked against its original UTF-8 content. Empty
+configuration is valid. Schema validation does not normalize or mask secrets.
+
+Example change event (independent of the snapshot topic):
+
+```json
+{
+  "schema_version": "1.0",
+  "event_id": "evt-001",
+  "asset_id": "router-001",
+  "event_type": "config_changed",
+  "source": "synthetic",
+  "event_time": "2026-09-30T03:00:00Z",
+  "ingest_time": "2026-09-30T03:00:01Z",
+  "metadata": {"snapshot_id": "snap-001"}
+}
+```
+
+The `synthetic` source label illustrates the contract; a producer does not exist
+yet. See [data-model semantics and limitations](docs/data-model.md) before writing
+producers or consumers. Tests exercise invalid inputs, generic assets, JSON
+round-trips, timestamp handling, content locations/hashes, diff consistency, and
+severity values. They are schema tests, not pipeline integration or performance tests.
+
 ## Initial roadmap
 
 | Phase | Deliverable |
 | --- | --- |
-| 0 | Bootstrap, architecture, tooling, packaging smoke test |
-| 1 | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
+| 0 — complete | Bootstrap, architecture, tooling, packaging smoke test |
+| 1 — complete | Pydantic Asset, ConfigSnapshot, ChangeEvent, ConfigDiff, Alert and tests |
 | 2 | Stateful, seeded synthetic workload generator with console output |
 | 3–4 | Single-broker Kafka in Docker Compose; Spark console consumer |
 | 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
