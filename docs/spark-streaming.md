@@ -267,10 +267,11 @@ smoke checks, not scalability, latency, or fault-tolerance experiments.
 
 Local mode is a single host, not evidence of distributed-cluster throughput or HA.
 Kafka remains the Phase 3 loopback-only plaintext single-broker development setup.
-No watermark, deduplication, asset join, stateful diff, normalization, rule engine,
-alert/DLQ producer, MinIO, Elasticsearch, API, or cloud deployment is included.
-Phase 5 should add tested generic text normalization/secret masking and diff logic,
-not change the ingestion contract. Stateful streaming policies belong to Phase 6.
+This streaming query includes no watermark, deduplication, asset join, stateful
+diff, normalization, rule engine, alert/DLQ producer, MinIO, Elasticsearch, API,
+or cloud deployment. Phase 5 provides tested [pure normalization/secret masking
+and explicit-pair diff](config-processing.md) separately, without changing this
+ingestion contract. Wiring it into stateful streaming belongs to Phase 6.
 
 ## References
 

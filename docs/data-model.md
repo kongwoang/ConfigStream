@@ -74,7 +74,7 @@ Exactly one of `content` and `content_uri` must be non-null. Empty string conten
 is valid and uses the SHA-256 of empty bytes. Inline hashes are checked; whitespace,
 newlines, and Unicode are not normalized first. This is a raw-content integrity
 hash, not a normalized-content hash. Secret-only changes can change this hash even
-when the future normalized diff is empty. `config_format` does not validate the
+when the Phase 5 normalized diff is empty. `config_format` does not validate the
 syntax of the configuration itself.
 
 References support `s3://bucket/path` and `https://host/path` with a non-root object
@@ -126,8 +126,10 @@ versioned event. Its version is governed by the containing ConfigDiff contract.
 
 Summary counts must agree with detail operations. `changed` cannot exceed
 `min(added, removed)`. A replaced line counts as one added, one removed, and one
-changed; do not sum all three as disjoint totals. The future diff engine determines
-replacement pairing; the schema cannot infer it from line text alone.
+changed; do not sum all three as disjoint totals. The Phase 5 engine pairs positions
+within each difflib replacement block; the schema cannot infer that pairing from
+line text alone. Its internal DiffResult carries normalized hashes and a version
+gap without extending this schema. See [processing semantics](config-processing.md).
 
 No-change diffs have zero counts and an empty list. Baseline diffs cannot remove
 lines. Line text preserves whitespace and permits blank lines for later display.

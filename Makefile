@@ -7,7 +7,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export TMPDIR := $(CURDIR)/.cache/tmp
 
-.PHONY: setup test lint format check generator clean
+.PHONY: setup test lint format check generator processing-demo clean
 .PHONY: kafka-up kafka-down kafka-topics kafka-status kafka-demo integration-test
 .PHONY: kafka-consume-assets kafka-consume-events kafka-consume-snapshots
 .PHONY: spark-setup spark-test spark-stream spark-integration-test
@@ -45,6 +45,9 @@ check: lint test
 
 generator:
 	@.venv/bin/python -m generator.main --assets 5 --events 10 --seed 42 --no-sleep
+
+processing-demo:
+	@.venv/bin/python -m processing.demo
 
 kafka-up:
 	$(DOCKER) compose up -d --wait --wait-timeout 180

@@ -13,13 +13,15 @@ a network automation framework or a frontend-first application.
 
 ## Current status
 
-**Phases 0, 1, 2, 3, and 4 complete.** Pydantic contracts,
+**Phases 0, 1, 2, 3, 4, and 5 complete.** Pydantic contracts,
 a deterministic stateful generator, JSONL output, and a local single-broker Kafka
 path with an explicit asset registry and automated CI are available.
 Spark Structured Streaming now reads `config.snapshots`, parses and validates
 envelopes, and prints safe metadata with valid/invalid diagnostics.
-**Normalization, diff, and rules are NOT implemented yet**, nor are data-lake,
-search, API, dashboard, or Kubernetes components.
+Pure Python text normalization, secret masking, and deterministic same-asset
+snapshot comparison are available separately in `processing`.
+**Spark stateful previous-version tracking is Phase 6**, not implemented yet.
+Rules, data-lake, search, API, dashboard, and Kubernetes components remain planned.
 
 Implemented Kafka path (all keys are `asset_id`):
 
@@ -74,6 +76,7 @@ library's base dependencies remain sufficient for JSONL; Kafka imports are lazy.
 | `make format` | Apply Ruff fixes and formatting |
 | `make check` | Run lint, formatting checks, and tests |
 | `make generator` | Print 10 changes (20 JSONL records) across 5 assets, seed 42, without sleeping |
+| `make processing-demo` | Normalize router-001 v10/v11 and print masked configurations, hashes, and a deterministic ConfigDiff |
 | `make kafka-up` / `make kafka-down` | Start a healthy broker / stop it, preserving its volume |
 | `make kafka-topics` | Create missing topics and verify their explicit configuration |
 | `make kafka-demo` | Publish 3 assets and 8 changes (19 records total) |
@@ -282,6 +285,37 @@ files. Generated `.jsonl` files and `datasets/` are ignored by Git.
 
 See [generator design, CLI, verification, and limitations](docs/generator.md).
 
+## Normalize and compare configurations
+
+```sh
+make processing-demo
+```
+
+The offline demo compares two snapshots of router-001, versions 10 and 11.
+It masks passwords and removes generated timestamp comments before producing:
+
+```diff
+- logging enabled
++ logging disabled
+- telnet disabled
++ telnet enabled
+```
+
+The existing `ConfigDiff` has `added=2`, `removed=2`, `changed=2`; replacements
+are a subset of additions/removals, not extra changes. The command prints both
+normalized hashes and the full model. Secret-only value rotations are deliberately
+invisible in this diff, but source snapshots and raw hashes remain unchanged.
+
+Use `processing.process_snapshot_pair(previous, current)` with validated
+ConfigSnapshots, or normalize each once and call `compare_snapshots`. Same asset
+and strictly increasing versions are required. Gaps are allowed and reported
+separately in `result.version_gap`. Text/inline content only; no remote fetching.
+
+Core processing tests need neither Kafka nor Spark. This logic is **not wired
+into the streaming query yet**; Phase 6 will select previous versions and manage
+distributed state. Normalization is conservative, not a universal secret detector.
+See [exact rules, hash semantics, version pairing, and limitations](docs/config-processing.md).
+
 ## Initial roadmap
 
 | Phase | Deliverable |
@@ -291,7 +325,8 @@ See [generator design, CLI, verification, and limitations](docs/generator.md).
 | 2 — complete | Stateful, seeded synthetic workload generator with JSONL output |
 | 3 — complete | Single-broker Kafka, asset registry, producer tests, GitHub Actions quality checks |
 | 4 — complete | Direct Spark Kafka source, envelope parsing, validation, diagnostics, checkpoints |
-| 5–6 | Normalization, diff, YAML rules, event-time state, deduplication, metrics |
+| 5 — complete | Pure text normalization/masking, normalized hashes, deterministic explicit-pair diff |
+| 6 | Spark version state, YAML rules, event-time handling, deduplication, metrics |
 | 7–9 | MinIO/Parquet, Elasticsearch, and thin FastAPI: end-to-end MVP |
 | 10 | Historical Spark analytics and simple frequency anomalies |
 | 11–13 | Optional dashboard, SSH/FRR adapters, then Kubernetes deployment |

@@ -1,7 +1,25 @@
+from collections.abc import Callable
 from hashlib import sha256
 from typing import Any
 
 import pytest
+
+from schemas import ConfigSnapshot
+
+
+@pytest.fixture
+def snapshot_factory(snapshot_payload: dict[str, Any]) -> Callable[..., ConfigSnapshot]:
+    def create(raw_content: str, **overrides: Any) -> ConfigSnapshot:
+        return ConfigSnapshot.model_validate(
+            {
+                **snapshot_payload,
+                "content": raw_content,
+                "hash": sha256(raw_content.encode("utf-8")).hexdigest(),
+                **overrides,
+            }
+        )
+
+    return create
 
 
 @pytest.fixture

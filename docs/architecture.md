@@ -3,11 +3,12 @@
 ## Scope and status
 
 ConfigStream focuses on distributed configuration-change storage and processing.
-Phases 0–4 supply a Python project, tested versioned schemas, a stateful generator,
+Phases 0–5 supply a Python project, tested versioned schemas, a stateful generator,
 JSONL output, Kafka ingestion with an asset registry, and direct Spark Structured
-Streaming parsing/validation to console. The generator can still run without
-external services. Normalization, diffs, rules, data-lake/serving sinks, APIs,
-Kubernetes, and monitoring systems remain future work.
+Streaming parsing/validation to console, and standalone normalization/diff logic.
+The generator and pure processing package can run without external services.
+Stateful streaming comparison, rules, data-lake/serving sinks, APIs, Kubernetes,
+and monitoring systems remain future work.
 
 ## Implemented synthetic source
 
@@ -83,10 +84,32 @@ metrics are logged without claiming measured throughput. See
 | Sources and collector | Obtain configuration; generate IDs, versions, timestamps; publish records without processing business rules |
 | Kafka | Decouple ingestion from compute; retain an ordered, replayable log per partition |
 | Spark Structured Streaming | Implemented parsing and basic validation; planned normalization, stateful comparison, rules, and event-time aggregations |
+| Pure processing | Implemented text normalization and explicit same-asset pair comparison; reusable logic, not distributed state management |
 | MinIO + Parquet | S3-compatible local historical source of truth; columnar data for analytical reads |
 | Elasticsearch | Derived, rebuildable serving/search indexes; not the authoritative historical store |
 | Spark batch | Read historical Parquet for frequency, severity, and anomaly analytics |
 | FastAPI | Thin query layer over Elasticsearch; no duplicate diff or rule logic |
+
+## Implemented configuration processing
+
+`processing` is independent of Spark and Kafka. A validated inline text
+ConfigSnapshot becomes an immutable NormalizedConfig, with ordered canonical
+text, conservative secret masking, and a separate SHA-256. Raw content/hashes
+remain untouched. Explicit previous/current normalized snapshots produce the
+existing ConfigDiff plus internal gap/hash diagnostics; no schema was extended.
+
+The current boundaries are:
+
+- Kafka → Spark parse/validate → safe console diagnostics (running stream).
+- ConfigSnapshot pair → pure normalization → deterministic diff (offline API).
+
+Normalization/diff logic is **available but not connected to the stream**.
+The caller must select snapshots for the same asset with increasing versions;
+cross-asset, duplicate, reverse, or reused snapshot identities fail clearly.
+Version gaps are allowed and exposed, never silently treated as consecutive.
+Arrival order does not establish a prior version. Phase 6 will own that state,
+lateness/deduplication, and replay policy inside Spark; no Python-side substitute
+or UDF is introduced now. See [processing contracts](config-processing.md).
 
 ## Streaming path
 
@@ -155,8 +178,9 @@ assets, and later rolling mean/standard-deviation/z-score anomalies.
 2. All five versioned domain contracts validate and JSON round-trip.
 3. Stateful generator produces meaningful consecutive versions on the console.
 4. Kafka consumer CLI observes keyed messages; Spark then parses them to console.
-5. Normalization, diff, rules, event-time state, and replay behavior are tested.
-6. Lake and serving sinks preserve history and expose results through FastAPI.
+5. Pure normalization and explicit-pair diff are tested without services.
+6. Future rules, event-time version state, and replay behavior are tested in Spark.
+7. Lake and serving sinks preserve history and expose results through FastAPI.
 
 The MVP scenario changes `logging enabled` to `logging disabled`, preserves both
 versions in the lake, and exposes a diff plus a high-severity `logging-disabled`
